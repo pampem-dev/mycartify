@@ -112,4 +112,19 @@ All colors MUST be HSL.
 }
 body {
   font-family: 'Inter', sans-serif;
+  overflow-y: scroll; 
+}
+
+#nprogress {
+  pointer-events: none;
+}
+
+#nprogress .bar {
+  background: #007aff; 
+  position: fixed;
+  z-index: 1031;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
 }
