@@ -1,5 +1,3 @@
-    {/* pag cinlick yung product */}
-
 import React from "react";
 
 const ProductCard = ({ product }) => {
