@@ -4,7 +4,10 @@ const productSchema = new mongoose.Schema({
   title: String,
   description: String,
   price: Number,
-  image: String,
+  image: {
+    type: String,
+    // Format: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD..."
+  },
   brand: String,
   category: String,
   stock: Number,

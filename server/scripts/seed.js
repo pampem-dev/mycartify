@@ -1,8 +1,15 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import Product from "./models/Product.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
+import sharp from 'sharp'; // npm install sharp
+import Product from "../models/Product.js";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const connectDB = async () => {
   try {
@@ -14,6 +21,97 @@ const connectDB = async () => {
   } catch (err) {
     console.error("❌ DB connection error:", err);
     process.exit(1);
+  }
+};
+
+// Optimized image processing with compression
+const imageToOptimizedBase64 = async (imagePath) => {
+  try {
+    const cleanPath = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
+    const fullPath = path.join(__dirname, '..', 'client', 'public', cleanPath);
+    
+    if (!fs.existsSync(fullPath)) {
+      console.warn(`⚠️  Image not found: ${fullPath}`);
+      return null;
+    }
+
+    console.log(`🔄 Optimizing ${imagePath}...`);
+    
+    // Use Sharp to resize and compress image
+    const optimizedBuffer = await sharp(fullPath)
+      .resize(400, 400, { 
+        fit: 'inside',
+        withoutEnlargement: true 
+      })
+      .jpeg({ 
+        quality: 80,
+        progressive: true 
+      })
+      .toBuffer();
+
+    const originalSize = fs.statSync(fullPath).size;
+    const optimizedSize = optimizedBuffer.length;
+    const compressionRatio = ((originalSize - optimizedSize) / originalSize * 100).toFixed(1);
+    
+    console.log(`📏 ${imagePath}: ${(originalSize/1024).toFixed(1)}KB → ${(optimizedSize/1024).toFixed(1)}KB (${compressionRatio}% smaller)`);
+    
+    // Convert to Base64
+    const base64 = optimizedBuffer.toString('base64');
+    const dataUrl = `data:image/jpeg;base64,${base64}`;
+    
+    // Check if resulting document would be too large
+    const estimatedDocSize = JSON.stringify({ base64: dataUrl }).length;
+    if (estimatedDocSize > 15 * 1024 * 1024) { // 15MB limit (safety margin)
+      console.warn(`⚠️  ${imagePath} still too large after optimization (${(estimatedDocSize/1024/1024).toFixed(1)}MB)`);
+      return null;
+    }
+    
+    return dataUrl;
+  } catch (error) {
+    console.error(`❌ Error processing image ${imagePath}:`, error.message);
+    return null;
+  }
+};
+
+// Modified Product schema for better performance
+const createOptimizedProductSchema = () => {
+  const productSchema = new mongoose.Schema({
+    title: { type: String, required: true, index: true },
+    brand: { type: String, required: true, index: true },
+    category: { type: String, required: true, index: true },
+    image: { type: String }, // Base64 image
+    thumbnail: { type: String }, // Smaller version for listings
+    price: { type: Number, required: true, index: true },
+    stock: { type: Number, required: true },
+    rating: { type: Number, default: 0 },
+    description: String
+  });
+  
+  // Create compound indexes for common queries
+  productSchema.index({ brand: 1, category: 1 });
+  productSchema.index({ price: 1, rating: -1 });
+  
+  return mongoose.model('Product', productSchema);
+};
+
+const generateThumbnail = async (imagePath) => {
+  try {
+    const cleanPath = imagePath.startsWith('/') ? imagePath.slice(1) : imagePath;
+    const fullPath = path.join(__dirname, '..', 'client', 'public', cleanPath);
+    
+    if (!fs.existsSync(fullPath)) return null;
+
+    // Create very small thumbnail (100x100, low quality)
+    const thumbnailBuffer = await sharp(fullPath)
+      .resize(100, 100, { fit: 'cover' })
+      .jpeg({ quality: 60 })
+      .toBuffer();
+
+    const base64 = thumbnailBuffer.toString('base64');
+    return `data:image/jpeg;base64,${base64}`;
+  } catch (error) {
+    console.error(`❌ Error creating thumbnail:`, error.message);
+    return null;
   }
 };
 
@@ -79,7 +177,7 @@ const realProducts = [
     price: 76999,
     stock: 10,
     rating: 4.8,
-    description: "Samsung’s best yet with a titanium frame, S Pen, and 200MP camera for ultimate detail."
+    description: "Samsung's best yet with a titanium frame, S Pen, and 200MP camera for ultimate detail."
   },
   {
     title: "Galaxy Z Fold 5",
@@ -231,9 +329,57 @@ const seedProducts = async () => {
   await connectDB();
 
   try {
+    console.log("🔄 Starting optimized image processing...");
+    
+    const imagesDir = path.join(__dirname, '..', 'client', 'public', 'images');
+    if (!fs.existsSync(imagesDir)) {
+      console.error(`❌ Images directory not found: ${imagesDir}`);
+      process.exit(1);
+    }
+
+    const productsWithOptimizedImages = [];
+    
+    for (const product of realProducts) {
+      console.log(`\n📝 Processing: ${product.title}`);
+      
+      const [optimizedImage, thumbnail] = await Promise.all([
+        imageToOptimizedBase64(product.image),
+        generateThumbnail(product.image)
+      ]);
+      
+      if (optimizedImage && thumbnail) {
+        productsWithOptimizedImages.push({
+          ...product,
+          image: optimizedImage,
+          thumbnail: thumbnail
+        });
+      }
+    }
+
+    console.log(`\n📊 Processing Summary:`);
+    console.log(`✅ Successfully processed: ${productsWithOptimizedImages.length} images`);
+    
+    if (productsWithOptimizedImages.length === 0) {
+      console.error("❌ No valid products to insert.");
+      process.exit(1);
+    }
+
+    console.log("\n🗃️  Clearing existing products...");
     await Product.deleteMany();
-    await Product.insertMany(realProducts);
-    console.log("✅ Real products inserted successfully!");
+    
+    console.log("💾 Inserting optimized products...");
+    
+    // Insert in smaller batches to avoid memory issues
+    const batchSize = 10;
+    for (let i = 0; i < productsWithOptimizedImages.length; i += batchSize) {
+      const batch = productsWithOptimizedImages.slice(i, i + batchSize);
+      await Product.insertMany(batch);
+      console.log(`📦 Inserted batch ${Math.floor(i/batchSize) + 1}`);
+    }
+    
+    console.log("✅ Optimized products inserted successfully!");
+    console.log(`📊 Total products in database: ${productsWithOptimizedImages.length}`);
+    
     process.exit();
   } catch (err) {
     console.error("❌ Error seeding products:", err);

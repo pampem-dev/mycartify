@@ -9,6 +9,10 @@ import TopLoader from "./components/TopLoader";
 import { CartProvider } from "./context/CartContext";
 import { Toaster } from 'react-hot-toast';
 import ScrollToTop from "./components/ScrollToTop";
+import AdminDashboard from "./pages/AdminDashboard";
+import Login from "./pages/Login";
+import AdminRoute from "./components/AdminRoute";
+import Register from "./pages/Register";
 
 const App = () => {
   return (
@@ -16,15 +20,21 @@ const App = () => {
       <ScrollToTop />
       <Toaster position="top-right" reverseOrder={false} />
       <CartProvider>
-      <TopLoader />
-      <Navbar />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/cart" element={<Cart />} />
-        <Route path="/product/:id" element={<ProductDetail />} />
-        {/* Add other routes here */}
-      </Routes>
-      <Footer />
+        <TopLoader />
+        <Navbar />
+        <Routes>
+          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/admin/dashboard" element={
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
+          } />
+          <Route path="/" element={<Home />} />
+          <Route path="/cart" element={<Cart />} />
+          <Route path="/product/:id" element={<ProductDetail />} />
+        </Routes>
+        <Footer />
       </CartProvider>
     </Router>
   );
